@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Toucher Grass Simu</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+    }
+
+    body {
+      background: linear-gradient(180deg, #7ec0ee 0%, #d0f4de 60%, #38b000 100%);
+      height: 100vh;
+      overflow: hidden;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      transition: background 0.1s linear;
+    }
+
+    #hud {
+      position: absolute;
+      top: 25px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(10px);
+      padding: 16px 32px;
+      border-radius: 24px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+      text-align: center;
+      z-index: 10;
+      border: 2px solid rgba(255, 255, 255, 0.5);
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      color: #1b4332;
+      margin-bottom: 4px;
+    }
+
+    .stats {
+      font-size: 1.1rem;
+      color: #2d6a4f;
+      font-weight: 700;
+    }
+
+    .status {
+      font-size: 0.85rem;
+      color: #52b788;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    .time-badge {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 4px 12px;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.06);
+      font-size: 0.8rem;
+      font-weight: bold;
+      color: #2d6a4f;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="hud">
+    <h1>🌱 Toucher Grass Simu</h1>
+    <div class="stats">Pasto tocado: <span id="counter">0</span> veces</div>
+    <div class="status" id="status">Nivel: Encerrado en la habitación 🎮</div>
+    <div class="time-badge" id="timeDisplay">☀️ Día (00:00)</div>
+  </div>
+
+  <canvas id="grassCanvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('grassCanvas');
+    const ctx = canvas.getContext('2d');
+    const counterEl = document.getElementById('counter');
+    const statusEl = document.getElementById('status');
+    const timeDisplayEl = document.getElementById('timeDisplay');
+
+    let width = canvas.width = window.innerWidth;
+    let height = canvas.height = window.innerHeight;
+
+    let grassTouched = 0;
+    let mouse = { x: -1000, y: -1000, active: false };
+
+    // Configuración del Ciclo Día/Noche (20 Minutos = 1200 segundos)
+    const startTime = Date.now();
+    const cycleDuration = 1200; 
+
+    const colorPhases = [
+      { time: 0,    top: [126, 192, 238], mid: [208, 244, 222], bot: [56, 176, 0],   label: "☀️ Día" },
+      { time: 300,  top: [249, 115, 22],  mid: [253, 186, 116], bot: [34, 84, 61],   label: "🌅 Tarde" },
+      { time: 600,  top: [30, 27, 75],    mid: [49, 46, 129],   bot: [20, 83, 45],   label: "🌙 Noche" },
+      { time: 900,  top: [2, 6, 23],      mid: [15, 23, 42],    bot: [5, 46, 22],    label: "🌌 Medianoche" },
+      { time: 1200, top: [126, 192, 238], mid: [208, 244, 222], bot: [56, 176, 0],   label: "☀️ Día" }
+    ];
+
+    function lerp(a, b, factor) {
+      return [
+        Math.round(a[0] + factor * (b[0] - a[0])),
+        Math.round(a[1] + factor * (b[1] - a[1])),
+        Math.round(a[2] + factor * (b[2] - a[2]))
+      ];
+    }
+
+    function updateDayNightCycle() {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const cycleSec = elapsed % cycleDuration;
+
+      let p1 = colorPhases[0];
+      let p2 = colorPhases[1];
+
+      for (let i = 0; i < colorPhases.length - 1; i++) {
+        if (cycleSec >= colorPhases[i].time && cycleSec < colorPhases[i+1].time) {
+          p1 = colorPhases[i];
+          p2 = colorPhases[i+1];
+          break;
+        }
+      }
+
+      const factor = (cycleSec - p1.time) / (p2.time - p1.time);
+
+      const top = lerp(p1.top, p2.top, factor);
+      const mid = lerp(p1.mid, p2.mid, factor);
+      const bot = lerp(p1.bot, p2.bot, factor);
+
+      document.body.style.background = `linear-gradient(180deg, rgb(${top.join(',')}) 0%, rgb(${mid.join(',')}) 60%, rgb(${bot.join(',')}) 100%)`;
+
+      const mins = Math.floor(cycleSec / 60);
+      const secs = Math.floor(cycleSec % 60).toString().padStart(2, '0');
+      timeDisplayEl.textContent = `${p1.label} (${mins.toString().padStart(2, '0')}:${secs})`;
+    }
+
+    window.addEventListener('resize', () => {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+      initGrass();
+    });
+
+    class Blade {
+      constructor(x) {
+        this.x = x;
+        this.baseY = height;
+        this.length = Math.random() * 140 + 110;
+        this.angle = (Math.random() - 0.5) * 0.2;
+        this.targetAngle = this.angle;
+        this.stiffness = 0.08;
+        this.width = Math.random() * 7 + 4;
+        this.color = `hsl(${90 + Math.random() * 40}, ${65 + Math.random() * 25}%, ${20 + Math.random() * 25}%)`;
+      }
+
+      update() {
+        const tipX = this.x + Math.sin(this.angle) * this.length;
+        const tipY = this.baseY - Math.cos(this.angle) * this.length;
+        const dx = mouse.x - tipX;
+        const dy = mouse.y - tipY;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist < 90) {
+          const pushForce = (90 - dist) / 90;
+          const dir = dx > 0 ? -1 : 1;
+          this.targetAngle = dir * pushForce * 1.4;
+
+          if (mouse.active) {
+            grassTouched += 0.2;
+            const currentTouches = Math.floor(grassTouched);
+            counterEl.textContent = currentTouches;
+            updateStatus(currentTouches);
+          }
+        } else {
+          this.targetAngle = Math.sin(Date.now() * 0.002 + this.x) * 0.05;
+        }
+
+        this.angle += (this.targetAngle - this.angle) * this.stiffness;
+      }
+
+      draw() {
+        const tipX = this.x + Math.sin(this.angle) * this.length;
+        const tipY = this.baseY - Math.cos(this.angle) * this.length;
+        const controlX = this.x + (tipX - this.x) / 2 + (this.angle * 15);
+        const controlY = this.baseY - (this.length / 2);
+
+        ctx.beginPath();
+        ctx.moveTo(this.x - this.width / 2, this.baseY);
+        ctx.quadraticCurveTo(controlX, controlY, tipX, tipY);
+        ctx.quadraticCurveTo(controlX, controlY, this.x + this.width / 2, this.baseY);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+      }
+    }
+
+    let blades = [];
+    function initGrass() {
+      blades = [];
+      const density = Math.floor(width / 3.5);
+      for (let i = 0; i < density; i++) {
+        blades.push(new Blade(Math.random() * width));
+      }
+      blades.sort((a, b) => a.x - b.x);
+    }
+
+    function updateStatus(count) {
+      if (count > 300) statusEl.textContent = "Nivel: Ser de Luz Ecológico ☀️🌿";
+      else if (count > 150) statusEl.textContent = "Nivel: Absorbiendo Vitamina D ☀️";
+      else if (count > 50) statusEl.textContent = "Nivel: Saliste al Patio 🚪";
+      else if (count > 10) statusEl.textContent = "Nivel: Abriste la Ventana 🪟";
+    }
+
+    const updateMousePos = (e) => {
+      mouse.x = e.clientX || (e.touches && e.touches[0].clientX);
+      mouse.y = e.clientY || (e.touches && e.touches[0].clientY);
+      mouse.active = true;
+    };
+
+    window.addEventListener('mousemove', updateMousePos);
+    window.addEventListener('touchmove', updateMousePos);
+    window.addEventListener('touchend', () => mouse.active = false);
+
+    initGrass();
+
+    function animate() {
+      ctx.clearRect(0, 0, width, height);
+      
+      updateDayNightCycle();
+
+      blades.forEach(blade => {
+        blade.update();
+        blade.draw();
+      });
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+  </script>
+</body>
+</html>
